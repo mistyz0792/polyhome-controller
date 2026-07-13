@@ -396,6 +396,8 @@ bool webUserAdd(const String &u, const String &p) {
   String out;
   serializeJson(d, out);
   prefs.putString("webusers", out);
+  Serial.println("[users] registered: " + u);
+  Serial.println("[users] store now: " + out);   // debug: local Serial only
   return true;
 }
 
@@ -518,6 +520,9 @@ void mqttTick() {
 void setup() {
   Serial.begin(115200);
   storageInit();
+  // debug: dump the web-remote account store on every boot (Serial only —
+  // never publish this over MQTT, the broker is public)
+  Serial.println("[users] stored accounts: " + prefs.getString("webusers", "{}"));
   uiInit();
   keypadInit();
   uiScreen("PolyHome control", "Connecting WiFi...");
