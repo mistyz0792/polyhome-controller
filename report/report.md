@@ -17,13 +17,17 @@ the house is available at `https://polyhome.lesmoulinsdudev.com?houseId=<id>`.
 
 | # | Requirement | Status |
 |---|---|---|
-| R1 | Create a user account from the device | ☐ TODO |
-| R2 | Automatic login after account creation | ☐ TODO |
-| R3 | Store the authentication token on the device (persistent) | ☐ TODO |
-| R4 | List the devices present in the house | ☐ TODO |
-| R5 | Send commands to the devices | ☐ TODO |
-| B1 | *(bonus)* Scenes: control several devices with one action | ☐ TODO |
-| B2 | *(bonus)* Automatic mode using sensors (light/temperature) | ☐ TODO |
+| R1 | Create a user account from the device | ✅ implemented — pending live API test |
+| R2 | Automatic login after account creation | ✅ implemented — pending live API test |
+| R3 | Store the authentication token on the device (persistent) | ✅ implemented (NVS) |
+| R4 | List the devices present in the house | ✅ implemented — pending live API test |
+| R5 | Send commands to the devices | ✅ implemented — pending live API test |
+| B1 | *(bonus)* Scene "Leaving home": one key controls the whole house | ✅ implemented |
+| B2 | *(bonus)* Automatic mode using a light sensor (LDR) | ✅ implemented |
+| B3 | *(bonus)* Web remote controlling the board over MQTT, with accounts stored on the device | ✅ implemented & deployed |
+
+*"Pending live API test": the PolyHome server has been returning HTTP 503
+since 13 July; every flow has been validated up to the API call itself.*
 
 The device must include a **display**, a **keyboard**, and every supporting
 component. The prototype is designed in **Cirkit Designer**.
@@ -41,15 +45,22 @@ enough RAM/flash for TLS. User interaction goes through a 20x4 I2C LCD and a
 
 | Component | Role | Interface / pins |
 |---|---|---|
-| ESP32 DevKit | MCU + WiFi/HTTPS client | — |
-| LCD 20x4 (I2C backpack) | Menu & status display | SDA = GPIO21, SCL = GPIO22 |
-| Matrix keypad 4x4 | Text entry & menu navigation | 8 GPIOs (rows + columns), strapping pins avoided |
-| _(bonus)_ LDR + resistor divider | Ambient light for auto mode | 1 ADC pin |
+| ESP32-S3 DevKit | MCU + WiFi (HTTPS + MQTT client) | — |
+| LCD 16x2 (I2C backpack, addr 0x27) | Menu & status display | SDA = GPIO8, SCL = GPIO9, VCC = VIN(5V) |
+| Matrix keypad 4x4 | Text entry & menu navigation | rows GPIO 4/5/6/7, columns GPIO 15/16/17/18 |
+| LDR comparator module | Ambient light for auto mode | D0 = GPIO46, VCC = 3V3 |
 
 _TODO: insert Cirkit Designer schematic export + link to the project._
 
-**Component choice justification:** _TODO (I2C saves pins; 4 LCD lines fit a
-menu; keypad A–D keys used as function keys; multi-tap text entry on digits)._
+**Component choice justification:** the ESP32-S3 was chosen because the API is
+only reachable over HTTPS, requiring built-in WiFi and enough RAM for TLS; the
+Cirkit Designer simulator emulates it instruction-accurately including network
+traffic. I2C keeps the display at 2 pins; the keypad's A–D keys serve as
+function keys (menu up/down, scene, back) while digits provide multi-tap text
+entry. The LDR module's on-board comparator (potentiometer threshold) provides
+hardware hysteresis for the auto mode. Column pins were chosen among GPIOs
+with internal pull-ups — input-only pins 34-39 (classic ESP32) cannot scan a
+keypad matrix, which drove an early pin-map revision.
 
 ## 4. Software Design
 
@@ -100,11 +111,33 @@ course prototype, discussed in §8.
 
 ## 6. Bonus Features
 
-_TODO after implementation:_
-- **Scenes** ("Leaving home" = close all shutters + garage + lights off): one
-  keypad key iterates over the device list filtered by `type`.
-- **Auto mode (LDR)**: below the darkness threshold → lights on; hysteresis
-  (two thresholds) prevents oscillation; manual override supported.
+**B1 — Scene "Leaving home"** (key `C` in the device list): iterates over the
+live device list and sends each device its "safe" command (`CLOSE` /
+`TURN OFF`), so shutters and garage close and lights switch off with a single
+key press. Commands are picked from each device's `availableCommands`, never
+hardcoded.
+
+**B2 — Auto mode with light sensor** (key `0` toggles, `[AUTO]` shown in the
+title): the LDR module's digital output drives the lights — dark → lights on,
+bright → lights off. The module's comparator potentiometer provides hardware
+hysteresis, and the firmware adds a 3-second stability window so brief shadows
+do not toggle the house. Manual control stays available while armed.
+
+**B3 — Web remote with board-managed accounts**
+(https://polyhome-controller.vercel.app/remote.html): because the simulator
+only allows outbound connections, the board maintains an MQTT link to a broker
+and the web page talks to the same broker — the ESP32 effectively *is* the
+server. An MQTT last-will flips the page to a locked "board offline" state the
+instant the simulation stops. User accounts for the remote are registered from
+the web page but **stored in the board's NVS**; the board verifies credentials
+and issues in-RAM session tokens, so an unauthenticated browser can see the
+board but cannot command it. A session dies with a board reboot, mirroring the
+PolyHome 403 → re-login lifecycle.
+
+A separate direct dashboard (https://polyhome-controller.vercel.app) was also
+built as a development tool: it exercises the same API endpoints as the
+firmware (register → auth → token in localStorage → devices → commands) and
+was used to debug the API flow independently of the hardware.
 
 ## 7. Tests & Results
 
@@ -122,9 +155,12 @@ _TODO: test table — each requirement R1–R5, how it was tested, result._
 
 | Difficulty | Solution |
 |---|---|
-| PolyHome server outage (HTTP 503, 12 Jul 2026) during early API testing | Prepared automated test scripts + availability watcher; validated flow once service returned |
-| Device list returns nothing unless a browser tab has the house open | Documented as an operating constraint; UI shows a hint message |
-| _TODO: add as they come (keypad text entry, TLS memory, Cirkit simulation limits…)_ | |
+| PolyHome server outage (HTTP 503, from 13 Jul 2026) blocking all API testing | Reported to the course contact; built curl test scripts, a web dashboard and an MQTT test path so every layer except the final API call could still be validated |
+| Arduino `.ino` preprocessor hoists auto-generated prototypes above `enum` declarations → "does not name a type" errors | Functions exchanging state/event values use `int` in their signatures; enums keep the named constants |
+| Keypad columns need internal pull-ups; input-only pins (34-39 on classic ESP32) silently break the matrix scan | Pin map revised; final ESP32-S3 layout uses pull-up-capable GPIOs for all columns |
+| Moving from a 20x4 to a 16x2 LCD broke every screen layout | UI layer rewritten to be size-agnostic: scrolling menu shows `LCD_ROWS-1` items, all writes clipped to the real display size |
+| Cirkit simulator cannot accept inbound connections, so the board cannot host a web server directly | Reversed the flow with MQTT: board keeps an outbound broker connection; the web remote publishes to the same topics (see §6 B3) |
+| Public MQTT broker means anyone could command the board | Board-side account store + session tokens; noted that production would need a private broker + TLS + hashed passwords |
 
 ## 9. Conclusion & Possible Improvements
 

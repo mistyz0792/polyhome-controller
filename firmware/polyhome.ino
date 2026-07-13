@@ -56,6 +56,9 @@
 // !! GPIO46 is an S3 strapping pin — fine in the simulator; on real hardware
 //    move it (e.g. GPIO 10) if the board fails to boot.
 #define PIN_LDR_DO 46
+// Most LDR comparator modules drive D0 HIGH in the dark; flip to LOW if the
+// auto mode reacts backwards with your module.
+#define LDR_DARK_LEVEL HIGH
 
 // ============================== STORAGE (NVS) ===============================
 
@@ -330,6 +333,7 @@ JsonObject deviceAt(uint8_t i) { return gDevices["devices"][i].as<JsonObject>();
 uint8_t commandCount() { return deviceAt(devSel)["availableCommands"].as<JsonArray>().size(); }
 
 void drawDeviceList() {
+  extern bool autoMode;   // defined below with the auto-mode logic
   String items[16];
   for (uint8_t i = 0; i < devCount && i < 16; i++) {
     JsonObject d = deviceAt(i);
@@ -338,7 +342,7 @@ void drawDeviceList() {
     else if (!d["opening"].isNull()) label += " " + String(d["opening"].as<int>()) + "%";
     items[i] = label;
   }
-  uiMenu("Devices  C=scene", items, devCount, devSel);
+  uiMenu(autoMode ? "Devices [AUTO]" : "Devices C=scn 0=au", items, devCount, devSel);
 }
 
 void drawCommandMenu() {
@@ -348,6 +352,45 @@ void drawCommandMenu() {
   uint8_t n = 0;
   for (JsonVariant c : cmds) if (n < 12) items[n++] = c.as<String>();
   uiMenu(d["id"].as<String>(), items, n, cmdSel);
+}
+
+// Auto mode bonus: LDR drives the lights. The comparator module already
+// applies a threshold (its potentiometer = hardware hysteresis); we add a
+// 3-second stability window so a waving hand doesn't toggle the house.
+bool autoMode = false;
+int  ldrLastRead = -1, ldrApplied = -1;
+unsigned long ldrStableSince = 0;
+
+String pickCommand(JsonObject dev, bool wantOn) {
+  for (JsonVariant c : dev["availableCommands"].as<JsonArray>()) {
+    String cmd = c.as<String>();
+    cmd.toUpperCase();
+    bool isOff = cmd.indexOf("OFF") >= 0;
+    bool isOn  = !isOff && cmd.indexOf("ON") >= 0;
+    if (wantOn ? isOn : isOff) return c.as<String>();
+  }
+  return "";
+}
+
+void autoTick() {
+  if (!autoMode || gToken.length() == 0 || gHouseId < 0 || devCount == 0) return;
+  int v = digitalRead(PIN_LDR_DO);
+  if (v != ldrLastRead) { ldrLastRead = v; ldrStableSince = millis(); return; }
+  if (millis() - ldrStableSince < 3000 || v == ldrApplied) return;
+  ldrApplied = v;
+  bool dark = (v == LDR_DARK_LEVEL);
+  uint8_t sent = 0;
+  for (uint8_t i = 0; i < devCount; i++) {
+    JsonObject d = deviceAt(i);
+    String type = d["type"].as<String>();
+    type.toUpperCase();
+    if (type.indexOf("LIGHT") < 0 && type.indexOf("LAMP") < 0) continue;
+    String cmd = pickCommand(d, dark);   // dark -> ON, bright -> OFF
+    if (cmd.length()) { apiSendCommand(gToken, gHouseId, d["id"].as<String>(), cmd); sent++; }
+  }
+  if (state == ST_DEVICE_LIST && sent) {
+    uiLine(0, dark ? "AUTO: dark->ON" : "AUTO: light->OFF");
+  }
 }
 
 // Scene bonus: one key press -> whole-house "leaving home"
@@ -525,6 +568,7 @@ void setup() {
   Serial.println("[users] stored accounts: " + prefs.getString("webusers", "{}"));
   uiInit();
   keypadInit();
+  pinMode(PIN_LDR_DO, INPUT);
   uiScreen("PolyHome control", "Connecting WiFi...");
   WiFi.mode(WIFI_STA);
   if (strlen(WIFI_PASSWORD)) WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -533,6 +577,7 @@ void setup() {
 
 void loop() {
   mqttTick();   // keep the web remote alive in every state
+  autoTick();   // LDR-driven lights when auto mode is armed
 
   switch (state) {
 
@@ -579,6 +624,13 @@ void loop() {
     }
     char k = keypadGetKey();
     if (k == 'A' || k == 'B') { sel = 1 - sel; drawn = false; }
+    if (k == '*') {                          // factory reset (wipe NVS)
+      prefs.clear();
+      gToken = ""; gLogin = ""; gPassword = "";
+      drawn = false;
+      showMessage("Storage wiped", "All data cleared", ST_ACCOUNT_MENU);
+      break;
+    }
     if (k == '#') {
       gRegistering = (sel == 1);
       entryReset(false);
@@ -659,6 +711,11 @@ void loop() {
     if (k == 'A' && devSel > 0)              { devSel--; drawDeviceList(); }
     if (k == 'B' && devSel + 1 < devCount)   { devSel++; drawDeviceList(); }
     if (k == '*') state = ST_LOAD_DEVICES;   // refresh states
+    if (k == '0') {                          // arm/disarm LDR auto mode
+      autoMode = !autoMode;
+      ldrApplied = -1;                       // re-evaluate light level on arm
+      drawDeviceList();
+    }
     if (k == 'C') state = ST_RUN_SCENE;
     if (k == '#') { cmdSel = 0; drawCommandMenu(); state = ST_COMMAND_MENU; }
     break;
