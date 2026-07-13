@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PolyHome — Chalet Control</title>
+<style>
+  :root {
+    --bg0:#0b1020; --bg1:#111832; --card:rgba(255,255,255,.055);
+    --stroke:rgba(255,255,255,.09); --txt:#e8ecf8; --muted:#8b93ad;
+    --accent:#6c8cff; --accent2:#9a6cff; --ok:#3ddc97; --warn:#ffb454; --err:#ff6b81;
+    --glow:0 0 24px rgba(108,140,255,.35);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',system-ui,sans-serif; }
+  body {
+    min-height:100vh; color:var(--txt);
+    background:
+      radial-gradient(1100px 500px at 85% -10%, rgba(154,108,255,.22), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(61,220,151,.10), transparent 55%),
+      radial-gradient(800px 420px at 10% -5%, rgba(108,140,255,.20), transparent 60%),
+      linear-gradient(160deg, var(--bg0), var(--bg1));
+    background-attachment:fixed;
+  }
+  .wrap { max-width:1060px; margin:0 auto; padding:28px 20px 60px; }
+
+  /* ---------- header ---------- */
+  header { display:flex; align-items:center; gap:14px; margin-bottom:26px; flex-wrap:wrap; }
+  .logo {
+    width:44px; height:44px; border-radius:13px; display:grid; place-items:center;
+    background:linear-gradient(135deg,var(--accent),var(--accent2)); box-shadow:var(--glow);
+    font-size:22px;
+  }
+  h1 { font-size:22px; font-weight:600; letter-spacing:.3px; }
+  h1 small { display:block; font-size:12px; color:var(--muted); font-weight:400; letter-spacing:1.5px; text-transform:uppercase; }
+  .spacer { flex:1; }
+  .chip {
+    display:inline-flex; align-items:center; gap:7px; padding:7px 13px; border-radius:99px;
+    background:var(--card); border:1px solid var(--stroke); font-size:12.5px; color:var(--muted);
+  }
+  .chip b { color:var(--txt); font-weight:600; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--err); }
+  .dot.on { background:var(--ok); box-shadow:0 0 10px var(--ok); }
+  button {
+    cursor:pointer; border:none; border-radius:12px; padding:10px 16px; font-size:14px;
+    color:var(--txt); background:var(--card); border:1px solid var(--stroke);
+    transition:.18s transform,.18s background,.18s box-shadow;
+  }
+  button:hover { background:rgba(255,255,255,.11); transform:translateY(-1px); }
+  button.primary {
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    border:none; font-weight:600; box-shadow:var(--glow);
+  }
+  button.ghost { color:var(--muted); font-size:12.5px; padding:7px 12px; }
+  button:disabled { opacity:.45; cursor:default; transform:none; }
+
+  /* ---------- auth card ---------- */
+  .auth {
+    max-width:420px; margin:7vh auto 0; padding:34px 32px 30px; border-radius:22px;
+    background:var(--card); border:1px solid var(--stroke); backdrop-filter:blur(14px);
+    box-shadow:0 24px 60px rgba(0,0,0,.4);
+  }
+  .auth h2 { font-size:19px; margin-bottom:4px; }
+  .auth p.sub { color:var(--muted); font-size:13px; margin-bottom:22px; }
+  .tabs { display:flex; gap:6px; background:rgba(0,0,0,.25); padding:5px; border-radius:12px; margin-bottom:20px; }
+  .tabs button { flex:1; padding:9px; border:none; background:transparent; color:var(--muted); font-weight:600; }
+  .tabs button.active { background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; box-shadow:var(--glow); }
+  label { display:block; font-size:12px; color:var(--muted); margin:14px 2px 6px; letter-spacing:.4px; }
+  input {
+    width:100%; padding:12px 14px; border-radius:12px; font-size:15px; color:var(--txt);
+    background:rgba(0,0,0,.28); border:1px solid var(--stroke); outline:none; transition:.18s border;
+  }
+  input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(108,140,255,.18); }
+  .auth .primary { width:100%; margin-top:22px; padding:13px; font-size:15px; }
+
+  /* ---------- scenes ---------- */
+  .scenes { display:flex; gap:12px; margin:6px 0 22px; flex-wrap:wrap; }
+  .scene {
+    flex:1; min-width:200px; display:flex; align-items:center; gap:13px; text-align:left;
+    padding:15px 18px; border-radius:16px;
+  }
+  .scene .ic { font-size:24px; }
+  .scene b { display:block; font-size:14.5px; }
+  .scene span { font-size:12px; color:var(--muted); }
+
+  /* ---------- device grid ---------- */
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; }
+  .card {
+    padding:18px; border-radius:18px; background:var(--card); border:1px solid var(--stroke);
+    backdrop-filter:blur(10px); display:flex; flex-direction:column; gap:12px;
+    animation:pop .3s ease both;
+  }
+  @keyframes pop { from { opacity:0; transform:translateY(8px);} }
+  .card .top { display:flex; align-items:center; gap:11px; }
+  .icon {
+    width:42px; height:42px; border-radius:12px; display:grid; place-items:center; font-size:21px;
+    background:rgba(108,140,255,.14); border:1px solid rgba(108,140,255,.25);
+  }
+  .icon.lit { background:rgba(255,180,84,.16); border-color:rgba(255,180,84,.4); box-shadow:0 0 18px rgba(255,180,84,.25); }
+  .card .name { font-weight:600; font-size:14.5px; }
+  .card .type { font-size:11.5px; color:var(--muted); letter-spacing:.6px; text-transform:uppercase; }
+  .state { font-size:12.5px; color:var(--muted); }
+  .state b { color:var(--txt); }
+  .bar { height:7px; border-radius:99px; background:rgba(0,0,0,.35); overflow:hidden; }
+  .bar i { display:block; height:100%; border-radius:99px; width:0;
+    background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .6s ease; }
+  .cmds { display:flex; flex-wrap:wrap; gap:7px; margin-top:auto; }
+  .cmds button { font-size:12px; padding:7px 12px; border-radius:9px; }
+  .cmds button:hover { border-color:var(--accent); color:#fff; }
+
+  .empty { text-align:center; padding:60px 20px; color:var(--muted); }
+  .empty .big { font-size:40px; margin-bottom:12px; }
+  .empty a { color:var(--accent); }
+
+  /* ---------- toast & banner ---------- */
+  #toasts { position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:9px; z-index:50; }
+  .toast {
+    padding:12px 17px; border-radius:13px; font-size:13.5px; backdrop-filter:blur(12px);
+    background:rgba(20,26,48,.92); border:1px solid var(--stroke); border-left:3px solid var(--accent);
+    box-shadow:0 12px 30px rgba(0,0,0,.4); animation:pop .25s ease;
+  }
+  .toast.ok  { border-left-color:var(--ok); }
+  .toast.err { border-left-color:var(--err); }
+  .banner {
+    display:none; margin-bottom:18px; padding:12px 16px; border-radius:13px; font-size:13.5px;
+    background:rgba(255,107,129,.1); border:1px solid rgba(255,107,129,.35); color:#ffc4cd;
+  }
+  .banner.show { display:block; }
+  #view-dash { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">🏔️</div>
+    <h1>PolyHome<small>Chalet Control</small></h1>
+    <div class="spacer"></div>
+    <span class="chip" id="chip-conn"><span class="dot" id="conn-dot"></span><span id="conn-txt">offline</span></span>
+    <span class="chip" id="chip-user" style="display:none">👤 <b id="who"></b></span>
+    <span class="chip" id="chip-token" style="display:none" title="click to copy token" onclick="copyToken()" style="cursor:pointer">🔑 <b id="tok-short"></b></span>
+    <button class="ghost" id="btn-logout" style="display:none" onclick="logout()">Logout</button>
+  </header>
+
+  <div class="banner" id="banner"></div>
+
+  <!-- ============ AUTH ============ -->
+  <section class="auth" id="view-auth">
+    <h2>Welcome to the chalet ✨</h2>
+    <p class="sub">Sign in to control shutters, garage &amp; lights</p>
+    <div class="tabs">
+      <button id="tab-login" class="active" onclick="setMode('login')">Login</button>
+      <button id="tab-register" onclick="setMode('register')">Create account</button>
+    </div>
+    <label>Login</label>
+    <input id="in-login" placeholder="e.g. kdijon26" autocomplete="off">
+    <label>Password</label>
+    <input id="in-pass" type="password" placeholder="••••••••">
+    <button class="primary" id="btn-go" onclick="submitAuth()">Sign in</button>
+  </section>
+
+  <!-- ============ DASHBOARD ============ -->
+  <section id="view-dash">
+    <div class="scenes">
+      <button class="scene" onclick="runScene('leave')">
+        <span class="ic">🚪</span>
+        <span><b>Leaving home</b><span>close shutters + garage · lights off</span></span>
+      </button>
+      <button class="scene" onclick="runScene('home')">
+        <span class="ic">🌅</span>
+        <span><b>Welcome home</b><span>open shutters · lights on</span></span>
+      </button>
+      <button class="scene" style="flex:0 0 auto" onclick="loadDevices(true)">
+        <span class="ic">🔄</span><span><b>Refresh</b><span id="last-refresh">–</span></span>
+      </button>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty" style="display:none">
+      <div class="big">🏠</div>
+      <p>No devices reported.<br>Open the house simulator in another tab:<br>
+      <a id="house-link" target="_blank"></a></p>
+    </div>
+  </section>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+const API = "/api";
+let token = localStorage.getItem("ph_token") || "";
+let who   = localStorage.getItem("ph_login") || "";
+let houseId = null, mode = "login", pollTimer = null;
+
+/* ---------- helpers ---------- */
+const $ = id => document.getElementById(id);
+function toast(msg, cls="") {
+  const t = document.createElement("div");
+  t.className = "toast " + cls; t.textContent = msg;
+  $("toasts").appendChild(t);
+  setTimeout(() => t.remove(), 3600);
+}
+function setConn(on, label) {
+  $("conn-dot").className = "dot" + (on ? " on" : "");
+  $("conn-txt").textContent = label;
+}
+async function api(path, method="GET", body=null) {
+  const headers = {};
+  if (body) headers["Content-Type"] = "application/json";
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(API + path, { method, headers, body: body ? JSON.stringify(body) : null });
+  let data = null;
+  try { data = await res.json(); } catch (_) {}
+  return { status: res.status, data };
+}
+
+/* ---------- auth ---------- */
+function setMode(m) {
+  mode = m;
+  $("tab-login").classList.toggle("active", m === "login");
+  $("tab-register").classList.toggle("active", m === "register");
+  $("btn-go").textContent = m === "login" ? "Sign in" : "Create account & sign in";
+}
+async function submitAuth() {
+  const login = $("in-login").value.trim(), pass = $("in-pass").value;
+  if (!login || !pass) return toast("Fill in login and password", "err");
+  $("btn-go").disabled = true;
+  try {
+    if (mode === "register") {
+      const r = await api("/users/register", "POST", { login, password: pass });
+      if (r.status === 409) return toast("Login already taken", "err");
+      if (r.status !== 200) return toast("Register failed (HTTP " + r.status + ")", "err");
+      toast("Account created 🎉 signing you in…", "ok");
+    }
+    // register returns no token -> always call /users/auth (same as the device)
+    const a = await api("/users/auth", "POST", { login, password: pass });
+    if (a.status === 404) return toast("Wrong login or password", "err");
+    if (a.status !== 200 || !a.data?.token) return toast("Login failed (HTTP " + a.status + ")", "err");
+    token = a.data.token; who = login;
+    localStorage.setItem("ph_token", token);
+    localStorage.setItem("ph_login", who);
+    toast("Welcome, " + who + " 👋", "ok");
+    enterDash();
+  } catch (e) { toast("Server unreachable", "err"); setConn(false, "offline"); }
+  finally { $("btn-go").disabled = false; }
+}
+function logout() {
+  localStorage.removeItem("ph_token");
+  token = ""; houseId = null;
+  clearInterval(pollTimer);
+  $("view-dash").style.display = "none";
+  $("view-auth").style.display = "block";
+  ["chip-user","chip-token","btn-logout"].forEach(id => $(id).style.display = "none");
+  setConn(false, "offline");
+}
+function copyToken() {
+  navigator.clipboard.writeText(token).then(() => toast("Token copied 🔑", "ok"));
+}
+
+/* ---------- dashboard ---------- */
+async function enterDash() {
+  const h = await api("/houses");
+  if (h.status === 403) { toast("Session expired — sign in again", "err"); return logout(); }
+  if (h.status !== 200 || !Array.isArray(h.data)) { toast("Could not load houses (HTTP " + h.status + ")", "err"); return; }
+  const own = h.data.find(x => x.owner) || h.data[0];
+  if (!own) { toast("No house on this account", "err"); return; }
+  houseId = own.houseId;
+
+  $("view-auth").style.display = "none";
+  $("view-dash").style.display = "block";
+  $("who").textContent = who;
+  $("tok-short").textContent = token.slice(0, 10) + "…";
+  ["chip-user","chip-token","btn-logout"].forEach(id => $(id).style.display = "inline-flex");
+  const link = "https://polyhome.lesmoulinsdudev.com?houseId=" + houseId;
+  $("house-link").href = link; $("house-link").textContent = link;
+  setConn(true, "house #" + houseId);
+
+  loadDevices(true);
+  clearInterval(pollTimer);
+  pollTimer = setInterval(() => loadDevices(false), 5000);
+}
+
+const ICONS = [
+  [/light|lamp|led/i, "💡"], [/garage|door/i, "🚗"],
+  [/shutter|blind|store|rolling/i, "🪟"], [/./, "🔌"]
+];
+function iconFor(type, on) {
+  const ic = ICONS.find(([re]) => re.test(type))[1];
+  return `<div class="icon${on ? " lit" : ""}">${ic}</div>`;
+}
+
+async function loadDevices(verbose) {
+  try {
+    const r = await api(`/houses/${houseId}/devices`);
+    if (r.status === 403) return logout();
+    if (r.status !== 200) {
+      if (verbose) toast("Device list failed — is the house open in a browser tab?", "err");
+      return;
+    }
+    const devs = r.data?.devices || [];
+    $("empty").style.display = devs.length ? "none" : "block";
+    renderDevices(devs);
+    $("last-refresh").textContent = new Date().toLocaleTimeString();
+    setConn(true, "house #" + houseId + " · " + devs.length + " devices");
+  } catch (e) { if (verbose) toast("Server unreachable", "err"); setConn(false, "offline"); }
+}
+
+function renderDevices(devs) {
+  const grid = $("grid");
+  grid.innerHTML = "";
+  for (const d of devs) {
+    const isLight = d.power !== undefined;
+    const on = isLight && Number(d.power) > 0;
+    let stateHtml = "";
+    if (d.opening !== undefined)
+      stateHtml = `<div class="state">Opening <b>${d.opening}%</b></div>
+                   <div class="bar"><i style="width:${d.opening}%"></i></div>`;
+    else if (isLight)
+      stateHtml = `<div class="state">Power <b>${on ? "ON" : "OFF"}</b></div>`;
+    const cmds = (d.availableCommands || []).map(c =>
+      `<button onclick="sendCmd('${d.id}','${c}')">${c}</button>`).join("");
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="top">${iconFor(d.type || "", on)}
+        <div><div class="name">${d.id}</div><div class="type">${d.type || "device"}</div></div>
+      </div>
+      ${stateHtml}
+      <div class="cmds">${cmds}</div>`;
+    grid.appendChild(card);
+  }
+}
+
+async function sendCmd(id, cmd) {
+  const r = await api(`/houses/${houseId}/devices/${id}/command`, "POST", { command: cmd });
+  if (r.status === 200) { toast(`${id} → ${cmd}`, "ok"); setTimeout(() => loadDevices(false), 700); }
+  else if (r.status === 403) logout();
+  else toast(`Command failed (HTTP ${r.status})`, "err");
+}
+
+/* ---------- scenes ---------- */
+async function runScene(kind) {
+  const r = await api(`/houses/${houseId}/devices`);
+  if (r.status !== 200) return toast("Cannot read devices for the scene", "err");
+  const devs = r.data?.devices || [];
+  let sent = 0;
+  for (const d of devs) {
+    const cmds = d.availableCommands || [];
+    const pick = kind === "leave"
+      ? cmds.find(c => /close|off/i.test(c))
+      : cmds.find(c => /open|on/i.test(c) && !/off/i.test(c));
+    if (pick) { await api(`/houses/${houseId}/devices/${d.id}/command`, "POST", { command: pick }); sent++; }
+  }
+  toast(`Scene done — ${sent} commands sent ${kind === "leave" ? "🚪" : "🌅"}`, "ok");
+  setTimeout(() => loadDevices(false), 800);
+}
+
+/* ---------- boot ---------- */
+$("in-pass").addEventListener("keydown", e => { if (e.key === "Enter") submitAuth(); });
+if (token) enterDash();   // auto-login with the stored token, like the device
+</script>
+</body>
+</html>
