@@ -27,5 +27,6 @@ PolyHome REST API at `https://polyhome.lesmoulinsdudev.com`.
 ## Links
 
 - Cirkit Designer project: _TODO_
-- Live dashboard (Vercel): _TODO_
+- Live dashboard (Vercel): https://polyhome-controller.vercel.app
+  (web remote: https://polyhome-controller.vercel.app/remote.html)
 - Virtual house: `https://polyhome.lesmoulinsdudev.com?houseId=<id>`
