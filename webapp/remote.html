@@ -67,7 +67,11 @@
   @keyframes pulse { 50% { opacity:.4; } }
   .lock b { font-size:16px; }
   .lock span { color:var(--muted); font-size:13px; max-width:380px; line-height:1.5; }
-  .hidden { display:none; }
+  .lock .form { display:flex; flex-direction:column; gap:9px; width:min(280px,90%); margin-top:6px; }
+  .lock .tabs { display:flex; gap:6px; }
+  .lock .tabs button { flex:1; }
+  .lock .tabs button.active { background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; }
+  .hidden { display:none !important; }
 
   #toasts { position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:8px; z-index:50; }
   .toast { padding:11px 16px; border-radius:12px; font-size:13px; background:rgba(20,26,48,.92);
@@ -84,6 +88,8 @@
     <div class="logo">📡</div>
     <h1>PolyHome Remote<small>via ESP32 board · MQTT</small></h1>
     <div class="spacer"></div>
+    <span class="chip hidden" id="user-chip">👤 <b id="user-name"></b></span>
+    <button class="hidden" id="btn-logout" onclick="boardLogout()">Logout</button>
     <span class="chip"><span class="dot" id="dot"></span><span id="status-txt">connecting…</span></span>
   </header>
 
@@ -105,6 +111,22 @@
       <span>Run the simulation in <b>Cirkit Designer</b> to take control.
       This remote only works while the ESP32 is alive — the board <i>is</i> the server.</span>
     </div>
+
+    <div class="lock hidden" id="authlock">
+      <div class="big">🔐</div>
+      <b>Sign in to control the board</b>
+      <span>Accounts live on the ESP32 itself — the board checks your
+      credentials and issues the session.</span>
+      <div class="form">
+        <div class="tabs">
+          <button id="t-login" class="active" onclick="setAuthMode('login')">Login</button>
+          <button id="t-register" onclick="setAuthMode('register')">Register</button>
+        </div>
+        <input id="a-user" placeholder="username" autocomplete="off">
+        <input id="a-pass" type="password" placeholder="password">
+        <button id="a-go" onclick="submitBoardAuth()">Sign in</button>
+      </div>
+    </div>
   </div>
 
   <p class="hint">Channel: <code id="ch"></code> · broker: <code>broker.hivemq.com</code> ·
@@ -118,6 +140,9 @@ let PREFIX = localStorage.getItem("ph_prefix") || "polyhome-kdijon26";
 $("prefix").value = PREFIX;
 
 let client = null, online = false, lastBeat = 0;
+let SESSION = localStorage.getItem("ph_session") || "";
+let BUSER   = localStorage.getItem("ph_buser") || "";
+let authMode = "login", pendingReq = null;
 
 function toast(msg, cls="") {
   const t = document.createElement("div");
@@ -125,12 +150,46 @@ function toast(msg, cls="") {
   $("toasts").appendChild(t); setTimeout(() => t.remove(), 3500);
 }
 
+// two lock layers: offline lock wins, then the board-login lock
+function updateLocks() {
+  $("lock").classList.toggle("hidden", online);
+  $("authlock").classList.toggle("hidden", !online || !!SESSION);
+  $("btn-refresh").disabled = !(online && SESSION);
+  $("user-chip").classList.toggle("hidden", !SESSION);
+  $("btn-logout").classList.toggle("hidden", !SESSION);
+  $("user-name").textContent = BUSER;
+}
+
 function setOnline(on) {
+  const was = online;
   online = on;
   $("dot").className = "dot" + (on ? " on" : "");
   $("status-txt").textContent = on ? "board online" : "board offline";
-  $("lock").classList.toggle("hidden", on);
-  $("btn-refresh").disabled = !on;
+  updateLocks();
+  if (on && !was && SESSION) askList();   // board (re)appeared: refresh
+}
+
+function setAuthMode(m) {
+  authMode = m;
+  $("t-login").classList.toggle("active", m === "login");
+  $("t-register").classList.toggle("active", m === "register");
+  $("a-go").textContent = m === "login" ? "Sign in" : "Create account";
+}
+
+function submitBoardAuth() {
+  const u = $("a-user").value.trim(), p = $("a-pass").value;
+  if (!u || !p) return toast("Fill username and password", "err");
+  pendingReq = Math.random().toString(16).slice(2);
+  client.publish(PREFIX + "/cmd",
+    JSON.stringify({ action: authMode, user: u, pass: p, reqId: pendingReq }));
+}
+
+function boardLogout() {
+  SESSION = ""; BUSER = "";
+  localStorage.removeItem("ph_session");
+  localStorage.removeItem("ph_buser");
+  $("grid").innerHTML = "";
+  updateLocks();
 }
 
 function reconnect() {
@@ -143,7 +202,7 @@ function reconnect() {
 
   client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", { clean: true });
   client.on("connect", () => {
-    ["status","beat","devices","ack"].forEach(l => client.subscribe(PREFIX + "/" + l));
+    ["status","beat","devices","ack","auth"].forEach(l => client.subscribe(PREFIX + "/" + l));
     $("status-txt").textContent = "board offline";
     toast("Connected to broker — waiting for the board…");
   });
@@ -165,6 +224,29 @@ function reconnect() {
       let a; try { a = JSON.parse(text); } catch { return; }
       toast(`${a.deviceId} → ${a.command} (HTTP ${a.http})`, a.http === 200 ? "ok" : "err");
     }
+    if (leaf === "auth") {
+      let a; try { a = JSON.parse(text); } catch { return; }
+      if (a.error === "invalid-session") {          // e.g. board rebooted
+        if (SESSION) { boardLogout(); toast("Session expired — sign in again", "err"); }
+        return;
+      }
+      if (pendingReq && a.reqId === pendingReq) {   // reply to OUR request
+        pendingReq = null;
+        if (a.ok) {
+          SESSION = a.session; BUSER = a.user;
+          localStorage.setItem("ph_session", SESSION);
+          localStorage.setItem("ph_buser", BUSER);
+          $("a-pass").value = "";
+          toast("Welcome, " + BUSER + " 👋", "ok");
+          updateLocks();
+          askList();
+        } else {
+          toast(a.error === "user-exists" ? "Username already taken"
+              : a.error === "bad-credentials" ? "Wrong username or password"
+              : "Failed: " + a.error, "err");
+        }
+      }
+    }
   });
   client.on("error", () => $("status-txt").textContent = "broker error");
 }
@@ -173,11 +255,13 @@ function reconnect() {
 setInterval(() => { if (online && Date.now() - lastBeat > 12000 && lastBeat) setOnline(false); }, 2000);
 
 function askList() {
-  client.publish(PREFIX + "/cmd", JSON.stringify({ action: "list" }));
+  if (!SESSION) return;
+  client.publish(PREFIX + "/cmd", JSON.stringify({ action: "list", session: SESSION }));
 }
 function sendCmd(id, cmd) {
-  if (!online) return;
-  client.publish(PREFIX + "/cmd", JSON.stringify({ action: "command", deviceId: id, command: cmd }));
+  if (!online || !SESSION) return;
+  client.publish(PREFIX + "/cmd",
+    JSON.stringify({ action: "command", session: SESSION, deviceId: id, command: cmd }));
 }
 
 function renderDevices(devs) {
@@ -201,6 +285,8 @@ function renderDevices(devs) {
   }
 }
 
+$("a-pass").addEventListener("keydown", e => { if (e.key === "Enter") submitBoardAuth(); });
+updateLocks();
 reconnect();
 </script>
 </body>

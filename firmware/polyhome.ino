@@ -371,6 +371,55 @@ void runLeavingHomeScene() {
   showMessage("Scene finished", String(done) + " commands sent", ST_LOAD_DEVICES);
 }
 
+// ============================== WEB USER ACCOUNTS ===========================
+// Accounts for the web remote, stored on the board itself (NVS key "webusers"
+// holds {"user":"pass", ...}). The board issues in-RAM session tokens; every
+// remote command must carry a valid session, so an unauthenticated browser
+// can see the board is online but cannot control it.
+
+#define WEB_MAX_SESSIONS 4
+String webSessTok[WEB_MAX_SESSIONS];
+String webSessUser[WEB_MAX_SESSIONS];
+uint8_t webSessNext = 0;
+
+bool webUserExists(const String &u) {
+  JsonDocument d;
+  deserializeJson(d, prefs.getString("webusers", "{}"));
+  return !d[u].isNull();
+}
+
+bool webUserAdd(const String &u, const String &p) {
+  JsonDocument d;
+  deserializeJson(d, prefs.getString("webusers", "{}"));
+  if (!d[u].isNull()) return false;
+  d[u] = p;
+  String out;
+  serializeJson(d, out);
+  prefs.putString("webusers", out);
+  return true;
+}
+
+bool webUserCheck(const String &u, const String &p) {
+  JsonDocument d;
+  deserializeJson(d, prefs.getString("webusers", "{}"));
+  return !d[u].isNull() && d[u].as<String>() == p && p.length() > 0;
+}
+
+String webNewSession(const String &u) {
+  String tok = String(esp_random(), HEX) + String(esp_random(), HEX);
+  webSessTok[webSessNext] = tok;          // ring buffer: oldest session drops
+  webSessUser[webSessNext] = u;
+  webSessNext = (webSessNext + 1) % WEB_MAX_SESSIONS;
+  return tok;
+}
+
+bool webSessionValid(const String &tok) {
+  if (tok.length() == 0) return false;
+  for (uint8_t i = 0; i < WEB_MAX_SESSIONS; i++)
+    if (webSessTok[i] == tok) return true;
+  return false;
+}
+
 // ============================== MQTT REMOTE =================================
 // Bridge for the web remote (webapp/remote.html). The Cirkit simulator only
 // allows OUTBOUND connections, so the board keeps a link to a public MQTT
@@ -405,6 +454,31 @@ void mqttCallback(char *t, byte *payload, unsigned int len) {
   JsonDocument d;
   if (deserializeJson(d, payload, len) != DeserializationError::Ok) return;
   String action = d["action"].as<String>();
+
+  // ---- account actions (no session needed) ----
+  if (action == "register" || action == "login") {
+    String u = d["user"].as<String>(), p = d["pass"].as<String>();
+    String reqId = d["reqId"].as<String>(), err = "", tok = "";
+    bool ok = false;
+    if (u.length() == 0 || p.length() == 0) err = "missing-fields";
+    else if (action == "register") {
+      if (webUserAdd(u, p)) ok = true; else err = "user-exists";
+    } else {
+      if (webUserCheck(u, p)) ok = true; else err = "bad-credentials";
+    }
+    if (ok) tok = webNewSession(u);
+    String out = String("{\"reqId\":\"") + reqId + "\",\"ok\":" +
+                 (ok ? "true" : "false") + ",\"user\":\"" + u +
+                 "\",\"session\":\"" + tok + "\",\"error\":\"" + err + "\"}";
+    mqtt.publish(mqttTopic("auth").c_str(), out.c_str());
+    return;
+  }
+
+  // ---- everything else requires a valid board session ----
+  if (!webSessionValid(d["session"].as<String>())) {
+    mqtt.publish(mqttTopic("auth").c_str(), "{\"error\":\"invalid-session\"}");
+    return;
+  }
   if (action == "list") publishDevices();
   else if (action == "command" && gToken.length() && gHouseId >= 0) {
     String dev = d["deviceId"].as<String>(), cmd = d["command"].as<String>();
